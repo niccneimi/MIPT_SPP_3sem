@@ -1,0 +1,13 @@
+__pycache__/
+
+.vscode/
+.history/
+*.code-workspace
+
+.env
+.env.*
+*.log
+logs/
+coverage/
+.cache/
+.tmp/
