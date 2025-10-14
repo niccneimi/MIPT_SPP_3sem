@@ -8,12 +8,10 @@ class GraphicsRecorder:
         self.times = []
 
     def record_step(self, current_time):
-        """Вызывается каждый шаг симуляции"""
         self.times.append(current_time)
         self.positions_over_time.append([block.position[0] for block in self.blocks])
 
     def plot_positions(self):
-        """Построить графики позиций блоков по времени"""
         positions_array = np.array(self.positions_over_time)
         plt.figure(figsize=(12, 6))
         for i in range(len(self.blocks)):
