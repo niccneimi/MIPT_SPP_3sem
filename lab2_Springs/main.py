@@ -1,5 +1,7 @@
 import numpy as np
 import pygame
+from graphics import GraphicsRecorder
+import colorsys
 
 
 class Scene2D:
@@ -71,10 +73,20 @@ class Spring:
 class Block:
     def __init__(self, x, y, size=0.5, mass=1.0):
         self.position = np.array([x, y], dtype=float)
+        self.initial_position = self.position.copy()
         self.velocity = np.zeros(2, dtype=float)
         self.force = np.zeros(2, dtype=float)
         self.size = size
         self.mass = mass
+
+
+    def get_block_color(self):
+        max_disp = 0.5
+        displacement = np.linalg.norm(self.position - self.initial_position)
+        t = np.clip(displacement / max_disp, 0, 1)
+        hue = (1 - t) * 0.0 + t * 0.75
+        r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+        return (int(r*255), int(g*255), int(b*255))
 
 
 def create_system():
@@ -132,8 +144,9 @@ def draw_scene(screen, scene, width_px=800, height_px=400):
     for block in scene.blocks:
         x, y = block.position
         size = block.size * scale_x
+        color = block.get_block_color()
         pygame.draw.rect(
-            screen, (200, 50, 50),
+            screen, color,
             pygame.Rect(int(x * scale_x), int(y * scale_y - int(size // 2)), int(size), int(size))
         )
 
@@ -144,14 +157,16 @@ def main():
     pygame.display.set_caption("2D Signal Propagation")
     scene, blocks, springs = create_system()
 
+    recorder = GraphicsRecorder(blocks)
     clock = pygame.time.Clock()
     running = True
 
     #SIGNAL
     blocks[0].position += np.array([-1, 0])
 
+    time_sim = 0.0
     dt = 0.02
-    damping = 0.15
+    damping = 0
 
     while running:
         for event in pygame.event.get():
@@ -186,7 +201,11 @@ def main():
         pygame.display.flip()
         clock.tick(60)
 
+        recorder.record_step(time_sim)
+        time_sim += dt
+
     pygame.quit()
+    recorder.plot_positions()
 
 if __name__ == "__main__":
     main()
