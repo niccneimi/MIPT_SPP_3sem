@@ -11,6 +11,7 @@ class Scene2D:
         self.walls = []
         self.springs = []
         self.blocks = []
+        self.gravity = np.array([0.0, 9.8])
 
     def add_wall(self, wall):
         self.walls.append(wall)
@@ -20,7 +21,7 @@ class Scene2D:
 
     def add_block(self, block):
         self.blocks.append(block)
-        
+
     def get_last_block(self):
         return self.blocks[-1]
 
@@ -38,7 +39,7 @@ class Wall:
 
 def _get_object_position(obj):
     if isinstance(obj, Block):
-        return obj.position
+        return obj.position.copy()
     elif isinstance(obj, Wall):
         x1, y1, x2, y2 = obj.get_position()
         return np.array([(x1 + x2) / 2, (y1 + y2) / 2])
@@ -47,10 +48,11 @@ def _get_object_position(obj):
 
 
 class Spring:
-    def __init__(self, obj1, obj2, stiffness=10, max_force=1000.0, initial_length=None):
+    def __init__(self, obj1, obj2, stiffness=10, damping=0.1, max_force=1000.0, initial_length=None):
         self.obj1 = obj1
         self.obj2 = obj2
         self.stiffness = stiffness
+        self.damping = damping
         self.max_force = max_force
 
         if initial_length is None:
@@ -71,14 +73,14 @@ class Spring:
 
 
 class Block:
-    def __init__(self, x, y, size=0.5, mass=1.0):
+    def __init__(self, x, y, size=0.5, mass=1.0, fixed=False):
         self.position = np.array([x, y], dtype=float)
         self.initial_position = self.position.copy()
         self.velocity = np.zeros(2, dtype=float)
         self.force = np.zeros(2, dtype=float)
         self.size = size
         self.mass = mass
-
+        self.fixed = fixed
 
     def get_block_color(self):
         max_disp = 0.5
@@ -86,40 +88,63 @@ class Block:
         t = np.clip(displacement / max_disp, 0, 1)
         hue = (1 - t) * 0.0 + t * 0.75
         r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
-        return (int(r*255), int(g*255), int(b*255))
+        return int(r * 255), int(g * 255), int(b * 255)
 
 
-def create_system():
-    block_count = 40
-    scene = Scene2D(100, 16)
+def create_grid_system():
+    rows, cols = 5, 5
+    scene = Scene2D(100, 100)
 
-    left_wall = Wall(1, 2, 1, 4)
-    right_wall = Wall((block_count + 1)*2, 2, (block_count + 1)*2, 4)
+    top_wall = Wall(10, 10, 90, 10)
+    bottom_wall = Wall(10, 90, 90, 90)
+    left_wall = Wall(10, 10, 10, 90)
+    right_wall = Wall(90, 10, 90, 90)
+
+    scene.add_wall(top_wall)
+    scene.add_wall(bottom_wall)
     scene.add_wall(left_wall)
     scene.add_wall(right_wall)
 
-    first_block = Block(3, 3)
-    scene.add_block(first_block)
-    
-    for i in range(block_count - 1):
-        last_block = scene.get_last_block()
-        new_block = Block(last_block.position[0] + 2, last_block.position[1])
-        scene.add_block(new_block)
-        
-    first_spring = Spring(left_wall, first_block)
-    scene.add_spring(first_spring)
-    
-    for i in range(1, len(scene.blocks)):
-        new_spring = Spring(scene.blocks[i - 1], scene.blocks[i])
-        scene.add_spring(new_spring)
-    
-    last_spring = Spring(scene.get_last_block(), right_wall)
-    scene.add_spring(last_spring)
+    blocks = []
+    spacing_x = 80 / (cols - 1)
+    spacing_y = 80 / (rows - 1)
+
+    for i in range(rows):
+        row_blocks = []
+        for j in range(cols):
+            x = 10 + j * spacing_x
+            y = 10 + i * spacing_y
+            fixed = (i == 0 and j == 0) or (i == 0 and j == cols - 1) or \
+                    (i == rows - 1 and j == 0) or (i == rows - 1 and j == cols - 1)
+            block = Block(x, y, size=1.5, mass=1.0, fixed=fixed)
+            scene.add_block(block)
+            row_blocks.append(block)
+        blocks.append(row_blocks)
+
+    for i in range(rows):
+        for j in range(cols):
+            current_block = blocks[i][j]
+
+            if j < cols - 1:
+                spring = Spring(current_block, blocks[i][j + 1], stiffness=15)
+                scene.add_spring(spring)
+
+            if i < rows - 1:
+                spring = Spring(current_block, blocks[i + 1][j], stiffness=15)
+                scene.add_spring(spring)
+
+            if i < rows - 1 and j < cols - 1:
+                spring = Spring(current_block, blocks[i + 1][j + 1], stiffness=10)
+                scene.add_spring(spring)
+
+            if i < rows - 1 and j > 0:
+                spring = Spring(current_block, blocks[i + 1][j - 1], stiffness=10)
+                scene.add_spring(spring)
 
     return scene, scene.blocks, scene.springs
 
 
-def draw_scene(screen, scene, width_px=800, height_px=400):
+def draw_scene(screen, scene, width_px=800, height_px=600):
     screen.fill((255, 255, 255))
     scale_x = width_px / scene.width
     scale_y = height_px / scene.height
@@ -135,8 +160,14 @@ def draw_scene(screen, scene, width_px=800, height_px=400):
     for spring in scene.springs:
         p1 = _get_object_position(spring.obj1)
         p2 = _get_object_position(spring.obj2)
+
+        current_length = np.linalg.norm(p2 - p1)
+        stretch = abs(current_length - spring.initial_length) / spring.initial_length
+        intensity = min(255, int(stretch * 500))
+        color = (intensity, 100, 255 - intensity)
+
         pygame.draw.line(
-            screen, (0, 128, 255),
+            screen, color,
             (p1[0] * scale_x, p1[1] * scale_y),
             (p2[0] * scale_x, p2[1] * scale_y), 2
         )
@@ -144,59 +175,108 @@ def draw_scene(screen, scene, width_px=800, height_px=400):
     for block in scene.blocks:
         x, y = block.position
         size = block.size * scale_x
-        color = block.get_block_color()
-        pygame.draw.rect(
+
+        if block.fixed:
+            color = (100, 100, 100)
+        else:
+            color = block.get_block_color()
+
+        pygame.draw.circle(
             screen, color,
-            pygame.Rect(int(x * scale_x), int(y * scale_y - int(size // 2)), int(size), int(size))
+            (int(x * scale_x), int(y * scale_y)),
+            int(size)
         )
+
+        pygame.draw.circle(
+            screen, (0, 0, 0),
+            (int(x * scale_x), int(y * scale_y)),
+            int(size), 1
+        )
+
+
+def apply_physics(scene, dt, damping=0.1):
+    for block in scene.blocks:
+        if not block.fixed:
+            block.force[:] = 0.0
+            block.force += scene.gravity * block.mass
+
+    for spring in scene.springs:
+        p1 = _get_object_position(spring.obj1)
+        p2 = _get_object_position(spring.obj2)
+        delta = p2 - p1
+        dist = np.linalg.norm(delta)
+
+        if dist == 0:
+            continue
+
+        direction = delta / dist
+        force_magnitude = spring.stiffness * (dist - spring.initial_length)
+        force_magnitude = np.clip(force_magnitude, -spring.max_force, spring.max_force)
+
+        if isinstance(spring.obj1, Block) and isinstance(spring.obj2, Block):
+            relative_velocity = spring.obj2.velocity - spring.obj1.velocity
+            damping_force = spring.damping * np.dot(relative_velocity, direction)
+            force_magnitude += damping_force
+
+        force = direction * force_magnitude
+
+        if isinstance(spring.obj1, Block) and not spring.obj1.fixed:
+            spring.obj1.force += force
+        if isinstance(spring.obj2, Block) and not spring.obj2.fixed:
+            spring.obj2.force -= force
+
+    for block in scene.blocks:
+        if not block.fixed:
+            block.force -= damping * block.velocity
+
+            acceleration = block.force / block.mass
+
+            block.velocity += acceleration * dt
+            block.position += block.velocity * dt
+
 
 def main():
     pygame.init()
-    width_px, height_px = 1600, 400
+    width_px, height_px = 1200, 800
     screen = pygame.display.set_mode((width_px, height_px))
-    pygame.display.set_caption("2D Signal Propagation")
-    scene, blocks, springs = create_system()
+    pygame.display.set_caption("2D Physics Simulation - Grid System")
+
+    scene, blocks, springs = create_grid_system()
 
     recorder = GraphicsRecorder(blocks)
     clock = pygame.time.Clock()
     running = True
 
-    #SIGNAL
-    blocks[0].position += np.array([-1, 0])
+    if hasattr(scene, 'gravity'):
+        scene.gravity = np.array([0.0, 9.8])
+
+    center_block = blocks[len(blocks) // 2] if hasattr(blocks, '__len__') else blocks[10]
+    if hasattr(center_block, 'position'):
+        center_block.position += np.array([0, -5])
 
     time_sim = 0.0
-    dt = 0.02
-    damping = 0
+    dt = 0.016  # ~60 FPS
 
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-                
-        for block in blocks:
-            block.force[:] = 0.0
-            
-        for spring in springs:
-            p1 = _get_object_position(spring.obj1)
-            p2 = _get_object_position(spring.obj2)
-            delta = p2 - p1
-            dist = np.linalg.norm(delta)
-            if dist == 0:
-                continue
-            direction = delta / dist
-            force = spring.stiffness * (dist - spring.initial_length)
-            force = np.clip(force, -spring.max_force, spring.max_force)
-            if isinstance(spring.obj1, Block):
-                spring.obj1.force += direction * force
-            if isinstance(spring.obj2, Block):
-                spring.obj2.force -= direction * force
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_x, mouse_y = pygame.mouse.get_pos()
+                scale_x = width_px / scene.width
+                scale_y = height_px / scene.height
+                mouse_pos = np.array([mouse_x / scale_x, mouse_y / scale_y])
 
-        for block in blocks:
-            block.force -= damping * block.velocity
-            acceleration = block.force / block.mass
-            block.velocity += acceleration * dt
-            block.position += block.velocity * dt
+                for block in blocks:
+                    if not block.fixed:
+                        dist = np.linalg.norm(block.position - mouse_pos)
+                        if dist < 5:
+                            direction = block.position - mouse_pos
+                            if np.linalg.norm(direction) > 0:
+                                direction = direction / np.linalg.norm(direction)
+                                block.velocity += direction * 10
 
+        apply_physics(scene, dt)
         draw_scene(screen, scene, width_px, height_px)
         pygame.display.flip()
         clock.tick(60)
@@ -206,6 +286,7 @@ def main():
 
     pygame.quit()
     recorder.plot_positions()
+
 
 if __name__ == "__main__":
     main()
