@@ -11,7 +11,7 @@ class Scene2D:
         self.walls = []
         self.springs = []
         self.blocks = []
-        self.gravity = np.array([0.0, 9.8])
+        self.gravity = np.array([0.0, 0.0])
 
     def add_wall(self, wall):
         self.walls.append(wall)
@@ -39,7 +39,7 @@ class Wall:
 
 def _get_object_position(obj):
     if isinstance(obj, Block):
-        return obj.position.copy()
+        return obj.position
     elif isinstance(obj, Wall):
         x1, y1, x2, y2 = obj.get_position()
         return np.array([(x1 + x2) / 2, (y1 + y2) / 2])
@@ -81,18 +81,18 @@ class Block:
         self.size = size
         self.mass = mass
         self.fixed = fixed
-
+        
     def get_block_color(self):
         max_disp = 0.5
         displacement = np.linalg.norm(self.position - self.initial_position)
         t = np.clip(displacement / max_disp, 0, 1)
-        hue = (1 - t) * 0.0 + t * 0.75
+        hue = t * 0.0 + (1 - t) * 0.75
         r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
         return int(r * 255), int(g * 255), int(b * 255)
 
 
 def create_grid_system():
-    rows, cols = 5, 5
+    rows, cols = 40, 40
     scene = Scene2D(100, 100)
 
     top_wall = Wall(10, 10, 90, 10)
@@ -116,7 +116,7 @@ def create_grid_system():
             y = 10 + i * spacing_y
             fixed = (i == 0 and j == 0) or (i == 0 and j == cols - 1) or \
                     (i == rows - 1 and j == 0) or (i == rows - 1 and j == cols - 1)
-            block = Block(x, y, size=1.5, mass=1.0, fixed=fixed)
+            block = Block(x, y, size=2, mass=1.0, fixed=fixed)
             scene.add_block(block)
             row_blocks.append(block)
         blocks.append(row_blocks)
@@ -144,7 +144,7 @@ def create_grid_system():
     return scene, scene.blocks, scene.springs
 
 
-def draw_scene(screen, scene, width_px=800, height_px=600):
+def draw_scene(screen, scene, width_px=800, height_px=600, draw_springs=True):
     screen.fill((255, 255, 255))
     scale_x = width_px / scene.width
     scale_y = height_px / scene.height
@@ -154,23 +154,19 @@ def draw_scene(screen, scene, width_px=800, height_px=600):
         pygame.draw.line(
             screen, (0, 0, 0),
             (x1 * scale_x, y1 * scale_y),
-            (x2 * scale_x, y2 * scale_y), 5
+            (x2 * scale_x, y2 * scale_y), 3
         )
 
-    for spring in scene.springs:
-        p1 = _get_object_position(spring.obj1)
-        p2 = _get_object_position(spring.obj2)
+    if draw_springs and len(scene.springs) < 5000:
+        for spring in scene.springs:
+            p1 = _get_object_position(spring.obj1)
+            p2 = _get_object_position(spring.obj2)
 
-        current_length = np.linalg.norm(p2 - p1)
-        stretch = abs(current_length - spring.initial_length) / spring.initial_length
-        intensity = min(255, int(stretch * 500))
-        color = (intensity, 100, 255 - intensity)
-
-        pygame.draw.line(
-            screen, color,
-            (p1[0] * scale_x, p1[1] * scale_y),
-            (p2[0] * scale_x, p2[1] * scale_y), 2
-        )
+            pygame.draw.line(
+                screen, (220, 220, 220),
+                (p1[0] * scale_x, p1[1] * scale_y),
+                (p2[0] * scale_x, p2[1] * scale_y), 1
+            )
 
     for block in scene.blocks:
         x, y = block.position
@@ -187,30 +183,27 @@ def draw_scene(screen, scene, width_px=800, height_px=600):
             int(size)
         )
 
-        pygame.draw.circle(
-            screen, (0, 0, 0),
-            (int(x * scale_x), int(y * scale_y)),
-            int(size), 1
-        )
 
+def apply_physics_optimized(scene, dt, damping=0.1):
+    movable_blocks = [b for b in scene.blocks if not b.fixed]
+    for block in movable_blocks:
+        block.force[:] = 0.0
+        block.force += scene.gravity * block.mass
+    
+    pos1_array = np.array([_get_object_position(s.obj1) for s in scene.springs])
+    pos2_array = np.array([_get_object_position(s.obj2) for s in scene.springs])
+    
+    delta = pos2_array - pos1_array
+    dist = np.linalg.norm(delta, axis=1)
 
-def apply_physics(scene, dt, damping=0.1):
-    for block in scene.blocks:
-        if not block.fixed:
-            block.force[:] = 0.0
-            block.force += scene.gravity * block.mass
+    valid_mask = dist > 1e-10
 
-    for spring in scene.springs:
-        p1 = _get_object_position(spring.obj1)
-        p2 = _get_object_position(spring.obj2)
-        delta = p2 - p1
-        dist = np.linalg.norm(delta)
-
-        if dist == 0:
+    for i, spring in enumerate(scene.springs):
+        if not valid_mask[i]:
             continue
-
-        direction = delta / dist
-        force_magnitude = spring.stiffness * (dist - spring.initial_length)
+            
+        direction = delta[i] / dist[i]
+        force_magnitude = spring.stiffness * (dist[i] - spring.initial_length)
         force_magnitude = np.clip(force_magnitude, -spring.max_force, spring.max_force)
 
         if isinstance(spring.obj1, Block) and isinstance(spring.obj2, Block):
@@ -225,14 +218,11 @@ def apply_physics(scene, dt, damping=0.1):
         if isinstance(spring.obj2, Block) and not spring.obj2.fixed:
             spring.obj2.force -= force
 
-    for block in scene.blocks:
-        if not block.fixed:
-            block.force -= damping * block.velocity
-
-            acceleration = block.force / block.mass
-
-            block.velocity += acceleration * dt
-            block.position += block.velocity * dt
+    for block in movable_blocks:
+        block.force -= damping * block.velocity
+        acceleration = block.force / block.mass
+        block.velocity += acceleration * dt
+        block.position += block.velocity * dt
 
 
 def main():
@@ -248,14 +238,16 @@ def main():
     running = True
 
     if hasattr(scene, 'gravity'):
-        scene.gravity = np.array([0.0, 9.8])
+        scene.gravity = np.array([0.0, 0.0])
 
     center_block = blocks[len(blocks) // 2] if hasattr(blocks, '__len__') else blocks[10]
     if hasattr(center_block, 'position'):
-        center_block.position += np.array([0, -5])
+        center_block.position += np.array([0, 0])
 
     time_sim = 0.0
-    dt = 0.016  # ~60 FPS
+    dt = 0.03  # ~60 FPS
+    
+    draw_springs_flag = True
 
     while running:
         for event in pygame.event.get():
@@ -267,7 +259,7 @@ def main():
                 scale_y = height_px / scene.height
                 mouse_pos = np.array([mouse_x / scale_x, mouse_y / scale_y])
 
-                for block in blocks:
+                for block in scene.blocks:
                     if not block.fixed:
                         dist = np.linalg.norm(block.position - mouse_pos)
                         if dist < 5:
@@ -276,8 +268,12 @@ def main():
                                 direction = direction / np.linalg.norm(direction)
                                 block.velocity += direction * 10
 
-        apply_physics(scene, dt)
-        draw_scene(screen, scene, width_px, height_px)
+        apply_physics_optimized(scene, dt)
+        draw_scene(screen, scene, width_px, height_px, draw_springs_flag)
+
+        fps = clock.get_fps()
+        pygame.display.set_caption(f"2D Physics Simulation - FPS: {fps:.1f}")
+        
         pygame.display.flip()
         clock.tick(60)
 
