@@ -92,7 +92,7 @@ class Block:
 
 
 def create_grid_system():
-    rows, cols = 40, 40
+    rows, cols = 40, 40 # 10, 10
     scene = Scene2D(100, 100)
 
     top_wall = Wall(10, 10, 90, 10)
@@ -115,7 +115,8 @@ def create_grid_system():
             x = 10 + j * spacing_x
             y = 10 + i * spacing_y
             fixed = (i == 0 and j == 0) or (i == 0 and j == cols - 1) or \
-                    (i == rows - 1 and j == 0) or (i == rows - 1 and j == cols - 1)
+                    (i == rows - 1 and j == 0) or (i == rows - 1 and j == cols - 1) # or \
+                    # (abs(i - rows // 2) < 5 and abs(j - cols // 2) < 5)
             block = Block(x, y, size=2, mass=1.0, fixed=fixed)
             scene.add_block(block)
             row_blocks.append(block)
