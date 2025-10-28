@@ -12,21 +12,66 @@ class Scene2D:
         self.springs = []
         self.blocks = []
         self.gravity = np.array([0.0, 0.0])
+        
+        self._positions_cache = None
+        self._velocities_cache = None
+        self._forces_cache = None
+        self._masses_cache = None
+        self._fixed_mask = None
+        self._needs_rebuild = True
 
     def add_wall(self, wall):
         self.walls.append(wall)
 
     def add_spring(self, spring):
         self.springs.append(spring)
+        self._needs_rebuild = True
 
     def add_block(self, block):
         self.blocks.append(block)
+        self._needs_rebuild = True
 
     def get_last_block(self):
         return self.blocks[-1]
 
     def get_all_objects(self):
         return self.walls + self.springs + self.blocks
+    
+    def rebuild_caches(self):
+        n = len(self.blocks)
+        self._positions_cache = np.array([b.position for b in self.blocks])
+        self._velocities_cache = np.array([b.velocity for b in self.blocks])
+        self._forces_cache = np.zeros((n, 2))
+        self._masses_cache = np.array([b.mass for b in self.blocks])
+        self._fixed_mask = np.array([b.fixed for b in self.blocks])
+        
+        if self.springs:
+            self._spring_indices = []
+            self._spring_stiffness = []
+            self._spring_damping = []
+            self._spring_initial_lengths = []
+            
+            block_to_idx = {id(b): i for i, b in enumerate(self.blocks)}
+            
+            for spring in self.springs:
+                if isinstance(spring.obj1, Block) and isinstance(spring.obj2, Block):
+                    idx1 = block_to_idx.get(id(spring.obj1))
+                    idx2 = block_to_idx.get(id(spring.obj2))
+                    if idx1 is not None and idx2 is not None:
+                        self._spring_indices.append([idx1, idx2])
+                        self._spring_stiffness.append(spring.stiffness)
+                        self._spring_damping.append(spring.damping)
+                        self._spring_initial_lengths.append(spring.initial_length)
+            
+            if self._spring_indices:
+                self._spring_indices = np.array(self._spring_indices)
+                self._spring_stiffness = np.array(self._spring_stiffness)
+                self._spring_damping = np.array(self._spring_damping)
+                self._spring_initial_lengths = np.array(self._spring_initial_lengths)
+            else:
+                self._spring_indices = np.empty((0, 2), dtype=int)
+        
+        self._needs_rebuild = False
 
 
 class Wall:
@@ -91,8 +136,27 @@ class Block:
         return int(r * 255), int(g * 255), int(b * 255)
 
 
+def get_all_block_colors_vectorized(blocks):
+    n = len(blocks)
+    colors = np.zeros((n, 3), dtype=int)
+    
+    positions = np.array([b.position for b in blocks])
+    initial_positions = np.array([b.initial_position for b in blocks])
+    
+    displacements = np.linalg.norm(positions - initial_positions, axis=1)
+    max_disp = 0.5
+    t = np.clip(displacements / max_disp, 0, 1)
+    hues = t * 0.0 + (1 - t) * 0.75
+    
+    for i, hue in enumerate(hues):
+        r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+        colors[i] = [int(r * 255), int(g * 255), int(b * 255)]
+    
+    return colors
+
+
 def create_grid_system():
-    rows, cols = 10, 10
+    rows, cols = 120, 120
     scene = Scene2D(100, 100)
 
     top_wall = Wall(10, 10, 90, 10)
@@ -115,8 +179,7 @@ def create_grid_system():
             x = 10 + j * spacing_x
             y = 10 + i * spacing_y
             fixed = (i == 0 and j == 0) or (i == 0 and j == cols - 1) or \
-                    (i == rows - 1 and j == 0) or (i == rows - 1 and j == cols - 1) # or \
-                    # (abs(i - rows // 2) < 5 and abs(j - cols // 2) < 5)
+                    (i == rows - 1 and j == 0) or (i == rows - 1 and j == cols - 1)
             block = Block(x, y, size=2, mass=1.0, fixed=fixed)
             scene.add_block(block)
             row_blocks.append(block)
@@ -127,19 +190,19 @@ def create_grid_system():
             current_block = blocks[i][j]
 
             if j < cols - 1:
-                spring = Spring(current_block, blocks[i][j + 1], stiffness=15)
+                spring = Spring(current_block, blocks[i][j + 1], stiffness=300)
                 scene.add_spring(spring)
 
             if i < rows - 1:
-                spring = Spring(current_block, blocks[i + 1][j], stiffness=15)
+                spring = Spring(current_block, blocks[i + 1][j], stiffness=300)
                 scene.add_spring(spring)
 
             if i < rows - 1 and j < cols - 1:
-                spring = Spring(current_block, blocks[i + 1][j + 1], stiffness=10)
+                spring = Spring(current_block, blocks[i + 1][j + 1], stiffness=200)
                 scene.add_spring(spring)
 
             if i < rows - 1 and j > 0:
-                spring = Spring(current_block, blocks[i + 1][j - 1], stiffness=10)
+                spring = Spring(current_block, blocks[i + 1][j - 1], stiffness=200)
                 scene.add_spring(spring)
 
     return scene, scene.blocks, scene.springs
@@ -169,14 +232,16 @@ def draw_scene(screen, scene, width_px=800, height_px=600, draw_springs=True):
                 (p2[0] * scale_x, p2[1] * scale_y), 1
             )
 
-    for block in scene.blocks:
+    colors = get_all_block_colors_vectorized(scene.blocks)
+    
+    for i, block in enumerate(scene.blocks):
         x, y = block.position
         size = block.size * scale_x
 
         if block.fixed:
             color = (100, 100, 100)
         else:
-            color = block.get_block_color()
+            color = tuple(colors[i])
 
         pygame.draw.circle(
             screen, color,
@@ -185,80 +250,91 @@ def draw_scene(screen, scene, width_px=800, height_px=600, draw_springs=True):
         )
 
 
-def apply_physics_optimized(scene, dt, damping=0.1):
-    movable_blocks = [b for b in scene.blocks if not b.fixed]
+def apply_physics_vectorized(scene, dt, damping=0.1):
+    if scene._needs_rebuild:
+        scene.rebuild_caches()
+    for i, block in enumerate(scene.blocks):
+        scene._positions_cache[i] = block.position
+        scene._velocities_cache[i] = block.velocity
+    
+    scene._forces_cache[:] = 0.0
+    movable_mask = ~scene._fixed_mask
+    scene._forces_cache[movable_mask] += scene.gravity * scene._masses_cache[movable_mask, np.newaxis]
+    
+    if len(scene._spring_indices) > 0:
+        idx1 = scene._spring_indices[:, 0]
+        idx2 = scene._spring_indices[:, 1]
+        
+        pos1 = scene._positions_cache[idx1]
+        pos2 = scene._positions_cache[idx2]
+        
+        deltas = pos2 - pos1
+        distances = np.linalg.norm(deltas, axis=1)
+    
+        valid_mask = distances > 1e-10
+        
+        directions = np.zeros_like(deltas)
+        directions[valid_mask] = deltas[valid_mask] / distances[valid_mask, np.newaxis]
+        
+        force_magnitudes = scene._spring_stiffness * (distances - scene._spring_initial_lengths)
+        
+        vel1 = scene._velocities_cache[idx1]
+        vel2 = scene._velocities_cache[idx2]
+        relative_velocities = vel2 - vel1
+        damping_forces = scene._spring_damping * np.sum(relative_velocities * directions, axis=1)
+        force_magnitudes += damping_forces
+        
+        forces = directions * force_magnitudes[:, np.newaxis]
+        
+        np.add.at(scene._forces_cache, idx1, forces)
+        np.add.at(scene._forces_cache, idx2, -forces)
+        
+    scene._forces_cache[scene._fixed_mask] = 0.0
+    
+    scene._forces_cache[movable_mask] -= damping * scene._velocities_cache[movable_mask]
+    
+    accelerations = scene._forces_cache / scene._masses_cache[:, np.newaxis]
+    scene._velocities_cache += accelerations * dt
+    scene._positions_cache += scene._velocities_cache * dt
+    
+    x_min, x_max = 8, 92
+    y_min, y_max = 8, 92
+    
+    sizes = np.array([b.size for b in scene.blocks])
 
-    # Сбрасываем силы и добавляем гравитацию
-    for block in movable_blocks:
-        block.force[:] = 0.0
-        block.force += scene.gravity * block.mass
+    left_collision = scene._positions_cache[:, 0] - sizes < x_min
+    scene._positions_cache[left_collision, 0] = x_min + sizes[left_collision]
+    scene._velocities_cache[left_collision, 0] *= -1
+    
+    right_collision = scene._positions_cache[:, 0] + sizes > x_max
+    scene._positions_cache[right_collision, 0] = x_max - sizes[right_collision]
+    scene._velocities_cache[right_collision, 0] *= -1
+    
+    top_collision = scene._positions_cache[:, 1] - sizes < y_min
+    scene._positions_cache[top_collision, 1] = y_min + sizes[top_collision]
+    scene._velocities_cache[top_collision, 1] *= -1
+    
+    bottom_collision = scene._positions_cache[:, 1] + sizes > y_max
+    scene._positions_cache[bottom_collision, 1] = y_max - sizes[bottom_collision]
+    scene._velocities_cache[bottom_collision, 1] *= -1
 
-    # Позиции блоков для пружин
-    springs_to_remove = []
-    for spring in scene.springs:
-        pos1 = _get_object_position(spring.obj1)
-        pos2 = _get_object_position(spring.obj2)
-        delta = pos2 - pos1
-        dist = np.linalg.norm(delta)
-        if dist < 1e-10:
-            continue
+    scene._velocities_cache[scene._fixed_mask] = 0.0
+    
+    for i, block in enumerate(scene.blocks):
+        if not block.fixed:
+            block.position[:] = scene._positions_cache[i]
+            block.velocity[:] = scene._velocities_cache[i]
 
-        # Разрыв пружины по длине
-        max_length = spring.initial_length * 1.6  # естественный порог
-        if dist > max_length:
-            springs_to_remove.append(spring)
-            continue
-
-        direction = delta / dist
-        force_magnitude = spring.stiffness * (dist - spring.initial_length)
-
-        # Демпфирование
-        if isinstance(spring.obj1, Block) and isinstance(spring.obj2, Block):
-            relative_velocity = spring.obj2.velocity - spring.obj1.velocity
-            force_magnitude += spring.damping * np.dot(relative_velocity, direction)
-
-        force = direction * force_magnitude
-        if isinstance(spring.obj1, Block) and not spring.obj1.fixed:
-            spring.obj1.force += force
-        if isinstance(spring.obj2, Block) and not spring.obj2.fixed:
-            spring.obj2.force -= force
-
-    # Удаляем разорванные пружины
-    for spring in springs_to_remove:
-        scene.springs.remove(spring)
-
-    # Обновляем блоки
-    for block in movable_blocks:
-        block.force -= damping * block.velocity
-        acceleration = block.force / block.mass
-        block.velocity += acceleration * dt
-        block.position += block.velocity * dt
-
-        # Упругое отражение от стенок конструкции (границы)
-        x_min, x_max = 8, 92
-        y_min, y_max = 8, 92
-
-        if block.position[0] - block.size < x_min:
-            block.position[0] = x_min + block.size
-            block.velocity[0] *= -1
-        elif block.position[0] + block.size > x_max:
-            block.position[0] = x_max - block.size
-            block.velocity[0] *= -1
-
-        if block.position[1] - block.size < y_min:
-            block.position[1] = y_min + block.size
-            block.velocity[1] *= -1
-        elif block.position[1] + block.size > y_max:
-            block.position[1] = y_max - block.size
-            block.velocity[1] *= -1
 
 def main():
     pygame.init()
     width_px, height_px = 1200, 800
     screen = pygame.display.set_mode((width_px, height_px))
-    pygame.display.set_caption("2D Physics Simulation - Grid System")
+    pygame.display.set_caption("2D Physics Simulation - Grid System (Optimized)")
 
     scene, blocks, springs = create_grid_system()
+    
+    scene.rebuild_caches()
 
     recorder = GraphicsRecorder(blocks)
     clock = pygame.time.Clock()
@@ -286,29 +362,32 @@ def main():
                 scale_y = height_px / scene.height
                 mouse_pos = np.array([mouse_x / scale_x, mouse_y / scale_y])
 
-                for block in scene.blocks:
-                    if not block.fixed:
-                        dist = np.linalg.norm(block.position - mouse_pos)
-                        if dist < 5:
-                            direction = block.position - mouse_pos
-                            if np.linalg.norm(direction) > 0:
-                                direction = direction / np.linalg.norm(direction)
-                                block.velocity += direction * 10
+                positions = np.array([b.position for b in scene.blocks])
+                distances = np.linalg.norm(positions - mouse_pos, axis=1)
+                close_blocks = distances < 5
+                
+                for i, is_close in enumerate(close_blocks):
+                    if is_close and not scene.blocks[i].fixed:
+                        block = scene.blocks[i]
+                        direction = block.position - mouse_pos
+                        dir_norm = np.linalg.norm(direction)
+                        if dir_norm > 0:
+                            direction = direction / dir_norm
+                            block.velocity += direction * 10
 
-        apply_physics_optimized(scene, dt)
+        apply_physics_vectorized(scene, dt)
         draw_scene(screen, scene, width_px, height_px, draw_springs_flag)
 
         fps = clock.get_fps()
-        pygame.display.set_caption(f"2D Physics Simulation - FPS: {fps:.1f}")
+        pygame.display.set_caption(f"2D Physics Simulation (Optimized) - FPS: {fps:.1f}")
         
         pygame.display.flip()
         clock.tick(60)
 
-        recorder.record_step(time_sim)
+        # recorder.record_step(time_sim)
         time_sim += dt
 
     pygame.quit()
-    recorder.plot_positions()
 
 
 if __name__ == "__main__":
