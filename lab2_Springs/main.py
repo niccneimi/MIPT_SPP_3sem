@@ -92,7 +92,7 @@ class Block:
 
 
 def create_grid_system():
-    rows, cols = 40, 40 # 10, 10
+    rows, cols = 10, 10
     scene = Scene2D(100, 100)
 
     top_wall = Wall(10, 10, 90, 10)
@@ -187,44 +187,70 @@ def draw_scene(screen, scene, width_px=800, height_px=600, draw_springs=True):
 
 def apply_physics_optimized(scene, dt, damping=0.1):
     movable_blocks = [b for b in scene.blocks if not b.fixed]
+
+    # Сбрасываем силы и добавляем гравитацию
     for block in movable_blocks:
         block.force[:] = 0.0
         block.force += scene.gravity * block.mass
-    
-    pos1_array = np.array([_get_object_position(s.obj1) for s in scene.springs])
-    pos2_array = np.array([_get_object_position(s.obj2) for s in scene.springs])
-    
-    delta = pos2_array - pos1_array
-    dist = np.linalg.norm(delta, axis=1)
 
-    valid_mask = dist > 1e-10
-
-    for i, spring in enumerate(scene.springs):
-        if not valid_mask[i]:
+    # Позиции блоков для пружин
+    springs_to_remove = []
+    for spring in scene.springs:
+        pos1 = _get_object_position(spring.obj1)
+        pos2 = _get_object_position(spring.obj2)
+        delta = pos2 - pos1
+        dist = np.linalg.norm(delta)
+        if dist < 1e-10:
             continue
-            
-        direction = delta[i] / dist[i]
-        force_magnitude = spring.stiffness * (dist[i] - spring.initial_length)
-        force_magnitude = np.clip(force_magnitude, -spring.max_force, spring.max_force)
 
+        # Разрыв пружины по длине
+        max_length = spring.initial_length * 1.6  # естественный порог
+        if dist > max_length:
+            springs_to_remove.append(spring)
+            continue
+
+        direction = delta / dist
+        force_magnitude = spring.stiffness * (dist - spring.initial_length)
+
+        # Демпфирование
         if isinstance(spring.obj1, Block) and isinstance(spring.obj2, Block):
             relative_velocity = spring.obj2.velocity - spring.obj1.velocity
-            damping_force = spring.damping * np.dot(relative_velocity, direction)
-            force_magnitude += damping_force
+            force_magnitude += spring.damping * np.dot(relative_velocity, direction)
 
         force = direction * force_magnitude
-
         if isinstance(spring.obj1, Block) and not spring.obj1.fixed:
             spring.obj1.force += force
         if isinstance(spring.obj2, Block) and not spring.obj2.fixed:
             spring.obj2.force -= force
 
+    # Удаляем разорванные пружины
+    for spring in springs_to_remove:
+        scene.springs.remove(spring)
+
+    # Обновляем блоки
     for block in movable_blocks:
         block.force -= damping * block.velocity
         acceleration = block.force / block.mass
         block.velocity += acceleration * dt
         block.position += block.velocity * dt
 
+        # Упругое отражение от стенок конструкции (границы)
+        x_min, x_max = 8, 92
+        y_min, y_max = 8, 92
+
+        if block.position[0] - block.size < x_min:
+            block.position[0] = x_min + block.size
+            block.velocity[0] *= -1
+        elif block.position[0] + block.size > x_max:
+            block.position[0] = x_max - block.size
+            block.velocity[0] *= -1
+
+        if block.position[1] - block.size < y_min:
+            block.position[1] = y_min + block.size
+            block.velocity[1] *= -1
+        elif block.position[1] + block.size > y_max:
+            block.position[1] = y_max - block.size
+            block.velocity[1] *= -1
 
 def main():
     pygame.init()
