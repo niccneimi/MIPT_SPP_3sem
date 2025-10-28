@@ -3,7 +3,6 @@ import pygame
 from graphics import GraphicsRecorder
 import colorsys
 
-
 class Scene2D:
     def __init__(self, width, height):
         self.width = width
@@ -325,7 +324,6 @@ def apply_physics_vectorized(scene, dt, damping=0.1):
             block.position[:] = scene._positions_cache[i]
             block.velocity[:] = scene._velocities_cache[i]
 
-
 def main():
     pygame.init()
     width_px, height_px = 1200, 800
@@ -333,19 +331,13 @@ def main():
     pygame.display.set_caption("2D Physics Simulation - Grid System (Optimized)")
 
     scene, blocks, springs = create_grid_system()
-    
     scene.rebuild_caches()
-
     recorder = GraphicsRecorder(blocks)
     clock = pygame.time.Clock()
     running = True
 
     if hasattr(scene, 'gravity'):
         scene.gravity = np.array([0.0, 0.0])
-
-    center_block = blocks[len(blocks) // 2] if hasattr(blocks, '__len__') else blocks[10]
-    if hasattr(center_block, 'position'):
-        center_block.position += np.array([0, 0])
 
     time_sim = 0.0
     dt = 0.03  # ~60 FPS
@@ -361,7 +353,6 @@ def main():
                 scale_x = width_px / scene.width
                 scale_y = height_px / scene.height
                 mouse_pos = np.array([mouse_x / scale_x, mouse_y / scale_y])
-
                 positions = np.array([b.position for b in scene.blocks])
                 distances = np.linalg.norm(positions - mouse_pos, axis=1)
                 close_blocks = distances < 5
@@ -378,16 +369,18 @@ def main():
         apply_physics_vectorized(scene, dt)
         draw_scene(screen, scene, width_px, height_px, draw_springs_flag)
 
+        recorder.record_step(time_sim)
+        
         fps = clock.get_fps()
         pygame.display.set_caption(f"2D Physics Simulation (Optimized) - FPS: {fps:.1f}")
         
         pygame.display.flip()
         clock.tick(60)
 
-        # recorder.record_step(time_sim)
         time_sim += dt
 
     pygame.quit()
+    recorder.plot_analysis()
 
 
 if __name__ == "__main__":
