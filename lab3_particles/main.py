@@ -5,14 +5,16 @@ import numba as nb
 import math
 import time
 
+from metrics import MetricsCollector
+
 W, H = 10.0, 6.0
-N = 10000
-radius = 0.01
+N = 100000
+radius = 0.005
 mass = 1.0
 temperature = 1.0
 dt = 0.004
 frames = 400
-fps = 60
+fps = 200
 cell_size = radius * 3.0
 steps_per_frame = 3
 np.random.seed(1)
@@ -154,8 +156,10 @@ step_numba(positions.copy(), velocities.copy(), radius, mass,
            cells.copy(), cell_counts.copy(),
            ncols, nrows, cell_size, W, H, dt)
 
+metrics = MetricsCollector(W, H, dt)
+
 t0 = time.time()
-for _ in range(50):
+for step in range(50):
     step_numba(positions, velocities, radius, mass,
                cells, cell_counts,
                ncols, nrows, cell_size, W, H, dt)
@@ -175,6 +179,8 @@ def animate(frame):
         step_numba(positions, velocities, radius, mass,
                    cells, cell_counts,
                    ncols, nrows, cell_size, W, H, dt)
+
+        metrics.update(positions, velocities, radius, step)
     scat.set_offsets(positions)
     ke = kinetic_energy(velocities)/N
     time_text.set_text(f"KE={ke:.3f}")
@@ -182,3 +188,8 @@ def animate(frame):
 
 anim = animation.FuncAnimation(fig, animate, frames=frames, interval=1000/fps, blit=True)
 plt.show()
+
+print("Статистика симуляции:")
+summary = metrics.get_summary()
+for key, value in summary.items():
+    print(f"{key}: {value:.4f}")
