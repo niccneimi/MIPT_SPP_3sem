@@ -99,14 +99,14 @@ class MetricsCollector:
             'mean_speed': []
         }
 
-    def update(self, positions, velocities, radius, step):
+    def update(self, positions, velocities, radius, current_time):
         self.msd_calc.update(positions)
         self.pressure_calc.update(positions, velocities, radius)
         ke = mean_kinetic_energy(velocities)
         pressure = self.pressure_calc.get_pressure()
         mean_speed = np.mean(np.linalg.norm(velocities, axis=1))
 
-        self.history['time'].append(step * self.dt)
+        self.history['time'].append(current_time)
         self.history['kinetic_energy'].append(ke)
         self.history['pressure'].append(pressure)
         self.history['mean_speed'].append(mean_speed)

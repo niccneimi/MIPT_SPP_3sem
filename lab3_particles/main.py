@@ -4,6 +4,7 @@ from matplotlib import animation
 import numba as nb
 import math
 import time
+from plot_metrics import plot_all_metrics
 
 from metrics import MetricsCollector
 
@@ -174,13 +175,19 @@ ax.set_title(f"(N={N})")
 scat = ax.scatter(positions[:,0], positions[:,1], s=(radius*2000), edgecolors='none')
 time_text = ax.text(0.02, 0.95, '', transform=ax.transAxes)
 
+step_counter = 0
+
 def animate(frame):
+    global step_counter
     for _ in range(steps_per_frame):
         step_numba(positions, velocities, radius, mass,
                    cells, cell_counts,
                    ncols, nrows, cell_size, W, H, dt)
+        step_counter += 1
 
-        metrics.update(positions, velocities, radius, step)
+    current_time = step_counter * dt
+    metrics.update(positions, velocities, radius, current_time)
+    
     scat.set_offsets(positions)
     ke = kinetic_energy(velocities)/N
     time_text.set_text(f"KE={ke:.3f}")
@@ -189,7 +196,4 @@ def animate(frame):
 anim = animation.FuncAnimation(fig, animate, frames=frames, interval=1000/fps, blit=True)
 plt.show()
 
-print("Статистика симуляции:")
-summary = metrics.get_summary()
-for key, value in summary.items():
-    print(f"{key}: {value:.4f}")
+plot_all_metrics(metrics, velocities, mass, dt)
