@@ -42,6 +42,20 @@ def init_velocities():
 positions = init_positions()
 velocities = init_velocities()
 
+square_size = 1.0
+square_x_min = W - square_size - 0.5
+square_y_min = 0.5
+square_x_max = W - 0.5
+square_y_max = square_size + 0.5
+
+# Находим индексы молекул в квадратике
+in_square = (positions[:, 0] >= square_x_min) & (positions[:, 0] <= square_x_max) & \
+            (positions[:, 1] >= square_y_min) & (positions[:, 1] <= square_y_max)
+marked_indices = np.where(in_square)[0]
+
+colors = np.full(N, 'blue')  # Все молекулы синие
+colors[marked_indices] = 'red'  # Молекулы в квадратике - красные
+
 MAX_PER_CELL = 20
 cells = np.full((num_cells, MAX_PER_CELL), -1, dtype=np.int32)
 cell_counts = np.zeros(num_cells, dtype=np.int32)
@@ -171,9 +185,16 @@ fig, ax = plt.subplots(figsize=(10,6))
 ax.set_xlim(0, W)
 ax.set_ylim(0, H)
 ax.set_aspect('equal')
-ax.set_title(f"(N={N})")
-scat = ax.scatter(positions[:,0], positions[:,1], s=(radius*2000), edgecolors='none')
-time_text = ax.text(0.02, 0.95, '', transform=ax.transAxes)
+ax.set_title(f"Молекулы газа (N={N})", fontsize=12)
+
+rect = plt.Rectangle((square_x_min, square_y_min), square_size, square_size,
+                    linewidth=2, edgecolor='red', facecolor='none', linestyle='--')
+ax.add_patch(rect)
+
+scat = ax.scatter(positions[:,0], positions[:,1], s=(radius*2000), 
+                  c=colors, edgecolors='none', alpha=0.7)
+time_text = ax.text(0.02, 0.95, '', transform=ax.transAxes, fontsize=10,
+                   bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
 
 step_counter = 0
 
@@ -190,7 +211,7 @@ def animate(frame):
     
     scat.set_offsets(positions)
     ke = kinetic_energy(velocities)/N
-    time_text.set_text(f"KE={ke:.3f}")
+    time_text.set_text(f"Время: {current_time:.2f}\nKE={ke:.3f}")
     return scat, time_text
 
 anim = animation.FuncAnimation(fig, animate, frames=frames, interval=1000/fps, blit=True)
