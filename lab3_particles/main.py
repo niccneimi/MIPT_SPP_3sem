@@ -20,9 +20,12 @@ cell_size = radius * 3.0
 steps_per_frame = 3
 np.random.seed(1)
 
+COLOR_BY_VELOCITY = True  # False для отключения раскраски по скорости
+
 ncols = int(W // cell_size) + 1
 nrows = int(H // cell_size) + 1
 num_cells = ncols * nrows
+
 
 @nb.njit(fastmath=True)
 def init_positions():
@@ -32,38 +35,28 @@ def init_positions():
         pos[i, 1] = np.random.uniform(radius, H - radius)
     return pos
 
+
 def init_velocities():
     v = np.random.normal(0, 1, (N, 2))
-    cur_mean_v2 = np.mean(np.sum(v**2, axis=1))
+    cur_mean_v2 = np.mean(np.sum(v ** 2, axis=1))
     scale = math.sqrt(2 * temperature / cur_mean_v2)
     v *= scale
     return v
 
+
 positions = init_positions()
 velocities = init_velocities()
-
-square_size = 1.0
-square_x_min = W - square_size - 0.5
-square_y_min = 0.5
-square_x_max = W - 0.5
-square_y_max = square_size + 0.5
-
-# Находим индексы молекул в квадратике
-in_square = (positions[:, 0] >= square_x_min) & (positions[:, 0] <= square_x_max) & \
-            (positions[:, 1] >= square_y_min) & (positions[:, 1] <= square_y_max)
-marked_indices = np.where(in_square)[0]
-
-colors = np.full(N, 'blue')  # Все молекулы синие
-colors[marked_indices] = 'red'  # Молекулы в квадратике - красные
 
 MAX_PER_CELL = 20
 cells = np.full((num_cells, MAX_PER_CELL), -1, dtype=np.int32)
 cell_counts = np.zeros(num_cells, dtype=np.int32)
 
+
 @nb.njit(fastmath=True)
 def clear_cells(cell_counts, cells):
     cell_counts[:] = 0
     cells[:] = -1
+
 
 @nb.njit(fastmath=True)
 def build_cells(pos, cells, cell_counts, ncols, nrows, cell_size, W, H):
@@ -85,43 +78,46 @@ def build_cells(pos, cells, cell_counts, ncols, nrows, cell_size, W, H):
             cells[idx, count] = i
             cell_counts[idx] = count + 1
 
+
 @nb.njit(fastmath=True)
 def resolve_pairwise(pos, vel, i, j, radius, mass):
-    rijx = pos[j,0] - pos[i,0]
-    rijy = pos[j,1] - pos[i,1]
-    dist2 = rijx*rijx + rijy*rijy
-    min_d = 2.0*radius
-    if dist2 < min_d*min_d and dist2 > 0.0:
+    rijx = pos[j, 0] - pos[i, 0]
+    rijy = pos[j, 1] - pos[i, 1]
+    dist2 = rijx * rijx + rijy * rijy
+    min_d = 2.0 * radius
+    if dist2 < min_d * min_d and dist2 > 0.0:
         dist = math.sqrt(dist2)
         nx = rijx / dist
         ny = rijy / dist
-        dvx = vel[j,0] - vel[i,0]
-        dvy = vel[j,1] - vel[i,1]
-        vn = dvx*nx + dvy*ny
+        dvx = vel[j, 0] - vel[i, 0]
+        dvy = vel[j, 1] - vel[i, 1]
+        vn = dvx * nx + dvy * ny
         if vn < 0.0:
-            imp = -2.0*vn / (1.0/mass + 1.0/mass)
+            imp = -2.0 * vn / (1.0 / mass + 1.0 / mass)
             ix = imp * nx
             iy = imp * ny
-            vel[i,0] -= ix / mass
-            vel[i,1] -= iy / mass
-            vel[j,0] += ix / mass
-            vel[j,1] += iy / mass
+            vel[i, 0] -= ix / mass
+            vel[i, 1] -= iy / mass
+            vel[j, 0] += ix / mass
+            vel[j, 1] += iy / mass
+
 
 @nb.njit(fastmath=True)
 def wall_collisions(pos, vel, radius, W, H):
     for i in range(pos.shape[0]):
-        if pos[i,0] < radius:
-            pos[i,0] = radius + (radius - pos[i,0])
-            vel[i,0] *= -1
-        if pos[i,0] > W - radius:
-            pos[i,0] = (W - radius) - (pos[i,0] - (W - radius))
-            vel[i,0] *= -1
-        if pos[i,1] < radius:
-            pos[i,1] = radius + (radius - pos[i,1])
-            vel[i,1] *= -1
-        if pos[i,1] > H - radius:
-            pos[i,1] = (H - radius) - (pos[i,1] - (H - radius))
-            vel[i,1] *= -1
+        if pos[i, 0] < radius:
+            pos[i, 0] = radius + (radius - pos[i, 0])
+            vel[i, 0] *= -1
+        if pos[i, 0] > W - radius:
+            pos[i, 0] = (W - radius) - (pos[i, 0] - (W - radius))
+            vel[i, 0] *= -1
+        if pos[i, 1] < radius:
+            pos[i, 1] = radius + (radius - pos[i, 1])
+            vel[i, 1] *= -1
+        if pos[i, 1] > H - radius:
+            pos[i, 1] = (H - radius) - (pos[i, 1] - (H - radius))
+            vel[i, 1] *= -1
+
 
 @nb.njit(fastmath=True, parallel=False)
 def step_numba(pos, vel, radius, mass,
@@ -129,8 +125,8 @@ def step_numba(pos, vel, radius, mass,
                cell_size, W, H, dt):
     N = pos.shape[0]
     for i in range(N):
-        pos[i,0] += vel[i,0]*dt
-        pos[i,1] += vel[i,1]*dt
+        pos[i, 0] += vel[i, 0] * dt
+        pos[i, 1] += vel[i, 1] * dt
 
     wall_collisions(pos, vel, radius, W, H)
 
@@ -143,11 +139,11 @@ def step_numba(pos, vel, radius, mass,
             countA = cell_counts[idx]
             if countA == 0:
                 continue
-            for dj in (-1,0,1):
+            for dj in (-1, 0, 1):
                 nj = cj + dj
                 if nj < 0 or nj >= nrows:
                     continue
-                for di in (-1,0,1):
+                for di in (-1, 0, 1):
                     ni = ci + di
                     if ni < 0 or ni >= ncols:
                         continue
@@ -164,8 +160,10 @@ def step_numba(pos, vel, radius, mass,
                             if i < j:
                                 resolve_pairwise(pos, vel, i, j, radius, mass)
 
+
 def kinetic_energy(v):
-    return 0.5 * mass * np.sum(v*v)
+    return 0.5 * mass * np.sum(v * v)
+
 
 step_numba(positions.copy(), velocities.copy(), radius, mass,
            cells.copy(), cell_counts.copy(),
@@ -179,24 +177,28 @@ for step in range(50):
                cells, cell_counts,
                ncols, nrows, cell_size, W, H, dt)
 t1 = time.time()
-print(f"≈{(t1-t0)/50:.6f} sec/step  → {1/((t1-t0)/50):.1f} steps/s")
+print(f"≈{(t1 - t0) / 50:.6f} sec/step  → {1 / ((t1 - t0) / 50):.1f} steps/s")
 
-fig, ax = plt.subplots(figsize=(10,6))
+fig, ax = plt.subplots(figsize=(10, 6))
 ax.set_xlim(0, W)
 ax.set_ylim(0, H)
 ax.set_aspect('equal')
 ax.set_title(f"Молекулы газа (N={N})", fontsize=12)
 
-rect = plt.Rectangle((square_x_min, square_y_min), square_size, square_size,
-                    linewidth=2, edgecolor='red', facecolor='none', linestyle='--')
-ax.add_patch(rect)
+if COLOR_BY_VELOCITY:
+    speeds = np.sqrt(np.sum(velocities ** 2, axis=1))
+    scat = ax.scatter(positions[:, 0], positions[:, 1], s=(radius * 2000),
+                      c=speeds, cmap='viridis', edgecolors='none', alpha=0.7)
+    cbar = plt.colorbar(scat, label='Скорость')
+else:
+    scat = ax.scatter(positions[:, 0], positions[:, 1], s=(radius * 2000),
+                      c='blue', edgecolors='none', alpha=0.7)
 
-scat = ax.scatter(positions[:,0], positions[:,1], s=(radius*2000), 
-                  c=colors, edgecolors='none', alpha=0.7)
 time_text = ax.text(0.02, 0.95, '', transform=ax.transAxes, fontsize=10,
-                   bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
+                    bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
 
 step_counter = 0
+
 
 def animate(frame):
     global step_counter
@@ -208,13 +210,19 @@ def animate(frame):
 
     current_time = step_counter * dt
     metrics.update(positions, velocities, radius, current_time)
-    
+
     scat.set_offsets(positions)
-    ke = kinetic_energy(velocities)/N
+
+    if COLOR_BY_VELOCITY:
+        speeds = np.sqrt(np.sum(velocities ** 2, axis=1))
+        scat.set_array(speeds)
+
+    ke = kinetic_energy(velocities) / N
     time_text.set_text(f"Время: {current_time:.2f}\nKE={ke:.3f}")
     return scat, time_text
 
-anim = animation.FuncAnimation(fig, animate, frames=frames, interval=1000/fps, blit=True)
+
+anim = animation.FuncAnimation(fig, animate, frames=frames, interval=1000 / fps, blit=True)
 plt.show()
 
 plot_all_metrics(metrics, velocities, mass, dt)
